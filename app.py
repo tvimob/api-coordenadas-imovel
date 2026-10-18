@@ -21,35 +21,42 @@ def obter_coordenadas():
       # Acessa a página do imóvel
       page.goto(url_imovel, timeout=60000)
 
-      # Clica no botão do mapa para forçar a renderização
+      # Clica no botão do mapa (#mapProperty) para forçar o Mapbox a carregar os elementos
       try:
         page.click('#mapProperty', timeout=5000)
-        page.wait_for_selector('.gallery-mosaic-container', timeout=5000)
+        # Aguarda o container do mosaico ou o link do Mapbox aparecer
+        page.wait_for_selector(
+            '.gallery-mosaic-container, .mapbox-improve-map', timeout=8000
+        )
       except Exception:
-        pass  # Se demorar ou o botão mudar, continua a leitura
+        pass  # Continua mesmo se o clique falhar ou demorar
 
-      # Varre a página em busca das coordenadas injetadas pelo Mapbox/Kenlo
+      # Executa o script no navegador para extrair as coordenadas do link do Mapbox
       coordenadas = page.evaluate("""() => {
                 let lat = null;
                 let lng = null;
 
-                // Tenta achar meta tags de localização
-                let metaLat = document.querySelector('meta[property="place:location:latitude"], [data-lat]');
-                let metaLng = document.querySelector('meta[property="place:location:longitude"], [data-lng]');
-                
-                if (metaLat) lat = metaLat.content || metaLat.getAttribute('data-lat');
-                if (metaLng) lng = metaLng.content || metaLng.getAttribute('data-lng');
+                // Procura especificamente pelo link do Mapbox que contém as coordenadas (ex: #/lng/lat/zoom)
+                let improveMapLink = document.querySelector('a.mapbox-improve-map');
+                if (improveMapLink) {
+                    let href = improveMapLink.getAttribute('href');
+                    // Exemplo de href: .../#-49.24246/-16.69721/14
+                    let match = href && href.match(/#(-?\\d+\\.\\d+)\\/(-?\\d+\\.\\d+)/);
+                    if (match) {
+                        lng = match[1]; // Longitude vem primeiro no padrão do Mapbox
+                        lat = match[2]; // Latitude vem em segundo
+                    }
+                }
 
-                // Se não achar nas metas, varre os scripts da página atrás de variáveis 'lat' e 'lng'
+                // Plano B: Se não achar no link, tenta varrer qualquer atributo ou texto com o padrão de coordenadas do mapa
                 if (!lat || !lng) {
-                    let scripts = Array.from(document.querySelectorAll('script'));
-                    for (let s of scripts) {
-                        let text = s.innerText;
-                        let matchLat = text.match(/["']?lat["']?\s*:\s*(-?\d{1,2}\.\d+)/);
-                        let matchLng = text.match(/["']?lng["']?\s*:\s*(-?\d{1,3}\.\d+)/);
-                        if (matchLat && matchLng) {
-                            lat = matchLat[1];
-                            lng = matchLng[1];
+                    let allLinks = Array.from(document.querySelectorAll('a'));
+                    for (let a of allLinks) {
+                        let h = a.getAttribute('href') || '';
+                        let m = h.match(/#(-?\\d+\\.\\d+)\\/(-?\\d+\\.\\d+)/);
+                        if (m) {
+                            lng = m[1];
+                            lat = m[2];
                             break;
                         }
                     }
@@ -59,6 +66,15 @@ def obter_coordenadas():
             }""")
 
       browser.close()
+
+      if not coordenadas['lat'] or not coordenadas['lng']:
+        return (
+            jsonify({
+                'sucesso': False,
+                'erro': 'Coordenadas não encontradas no mapa',
+            }),
+            404,
+        )
 
       return jsonify({
           'sucesso': True,
@@ -72,3 +88,5 @@ def obter_coordenadas():
 
 if __name__ == '__main__':
   app.run(host='0.0.0.0', port=5000)
+
+// Atualizado 1
